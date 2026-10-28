@@ -1,4 +1,4 @@
-# Databricks notebook source
+﻿# Databricks notebook source
 # MAGIC %md
 # MAGIC # 01 - Bronze v2: ingestão incremental com Auto Loader
 # MAGIC Regras desta camada:
@@ -48,7 +48,7 @@ SOURCES = [
 # O checkpoint novo não sabe disso -> leria tudo de novo e duplicaria.
 # True = apaga tabelas + checkpoints e recarrega do zero.
 # ATENÇÃO: depois da 1ª execução, mude para False.
-RESET_BRONZE = True
+RESET_BRONZE = False
 
 if RESET_BRONZE:                                               # só roda se o flag estiver ligado
     for src in SOURCES:                                        # percorre cada fonte
