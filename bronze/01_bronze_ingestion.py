@@ -1,4 +1,4 @@
-﻿# Databricks notebook source
+# Databricks notebook source
 # MAGIC %md
 # MAGIC # 01 - Bronze v2: ingestão incremental com Auto Loader
 # MAGIC Regras desta camada:
