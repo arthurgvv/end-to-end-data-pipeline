@@ -10,10 +10,15 @@
 # COMMAND ----------
 
 # ===== 1. Configuração =====
-CATALOG = "workspace"                                          # catálogo do Unity Catalog
+# Parâmetros (widgets): o Job envia "catalog"; rodando à mão, valem os padrões abaixo
+dbutils.widgets.text("catalog", "workspace", "Catálogo")
+dbutils.widgets.dropdown("reset_bronze", "false", ["false", "true"], "Reset da Bronze")
+dbutils.widgets.text("confirm_reset", "", "Confirmação do reset")
+
+CATALOG = dbutils.widgets.get("catalog")                       # catálogo do Unity Catalog (ex: workspace, dev, prod)
 SCHEMA = "bronze"                                              # schema da camada Bronze
-RAW_PATH = "/Volumes/workspace/bronze/raw_files/archive/"      # pasta dos CSVs (corrige o caminho sem archive/)
-CHECKPOINT_BASE = "/Volumes/workspace/bronze/checkpoints/"     # onde o Auto Loader guarda o progresso
+RAW_PATH = f"/Volumes/{CATALOG}/{SCHEMA}/raw_files/archive/"   # pasta dos CSVs
+CHECKPOINT_BASE = f"/Volumes/{CATALOG}/{SCHEMA}/checkpoints/"  # onde o Auto Loader guarda o progresso
 LOG_TABLE = f"{CATALOG}.{SCHEMA}.ingestion_log"                # tabela de log das cargas
 
 # Cria o Volume de checkpoints, se ainda não existir
@@ -43,14 +48,21 @@ SOURCES = [
 
 # COMMAND ----------
 
-# ===== 3. Reset (só na 1ª execução da v2) =====
-# Por quê: as tabelas atuais foram criadas em batch (overwrite).
-# O checkpoint novo não sabe disso -> leria tudo de novo e duplicaria.
-# True = apaga tabelas + checkpoints e recarrega do zero.
-# ATENÇÃO: depois da 1ª execução, mude para False.
-RESET_BRONZE = False
+# ===== 3. Reset (apaga tabelas + checkpoints e recarrega do zero) =====
+# Quando usar: o checkpoint ficou fora de sincronia com as tabelas
+# (ex: tabelas criadas por outra carga). Sem reset, o Auto Loader leria tudo de novo e duplicaria.
+#
+# Proteção (incidente de 28/10): antes o reset era uma variável no código,
+# fácil de esquecer ligada ou desligada. Agora ele:
+#   - vem desligado por padrão (o Job nunca envia reset_bronze);
+#   - só roda se "confirm_reset" for exatamente "APAGAR <catalogo>.bronze".
+RESET_BRONZE = dbutils.widgets.get("reset_bronze") == "true"
+CONFIRM_TEXT = f"APAGAR {CATALOG}.{SCHEMA}"                    # frase que precisa ser digitada
 
-if RESET_BRONZE:                                               # só roda se o flag estiver ligado
+if RESET_BRONZE and dbutils.widgets.get("confirm_reset") != CONFIRM_TEXT:
+    raise ValueError(f'Reset bloqueado: digite "{CONFIRM_TEXT}" no widget confirm_reset para confirmar.')
+
+if RESET_BRONZE:                                               # só chega aqui com reset confirmado
     for src in SOURCES:                                        # percorre cada fonte
         full_name = f"{CATALOG}.{SCHEMA}.{src['table']}"       # nome completo: catalogo.schema.tabela
         spark.sql(f"DROP TABLE IF EXISTS {full_name}")         # apaga a tabela antiga
@@ -165,38 +177,42 @@ for src in SOURCES:
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC -- Última execução de cada tabela
-# MAGIC SELECT * FROM workspace.bronze.ingestion_log
-# MAGIC ORDER BY started_at DESC
+# Última execução de cada tabela
+display(spark.sql(f"""
+    SELECT * FROM {CATALOG}.bronze.ingestion_log
+    ORDER BY started_at DESC
+"""))
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC -- Todas as colunas devem ser STRING + _rescued_data, _source_file, _ingestion_timestamp
-# MAGIC DESCRIBE workspace.bronze.olist_customers
+# Todas as colunas devem ser STRING + _rescued_data, _source_file, _ingestion_timestamp
+display(spark.sql(f"""
+    DESCRIBE {CATALOG}.bronze.olist_customers
+"""))
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC -- CEP com zero à esquerda deve aparecer (antes virava int e perdia o zero)
-# MAGIC SELECT customer_zip_code_prefix, customer_city, _source_file
-# MAGIC FROM workspace.bronze.olist_customers
-# MAGIC WHERE customer_zip_code_prefix LIKE '0%'
-# MAGIC LIMIT 5
+# CEP com zero à esquerda deve aparecer (antes virava int e perdia o zero)
+display(spark.sql(f"""
+    SELECT customer_zip_code_prefix, customer_city, _source_file
+    FROM {CATALOG}.bronze.olist_customers
+    WHERE customer_zip_code_prefix LIKE '0%'
+    LIMIT 5
+"""))
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC -- Reviews: o dataset original tem 99.224 linhas
-# MAGIC -- Número maior = multiLine/escape não funcionou
-# MAGIC SELECT COUNT(*) AS total,
-# MAGIC        COUNT(_rescued_data) AS linhas_resgatadas
-# MAGIC FROM workspace.bronze.olist_order_reviews
+# Reviews: o dataset original tem 99.224 linhas
+# Número maior = multiLine/escape não funcionou
+display(spark.sql(f"""
+    SELECT COUNT(*) AS total,
+           COUNT(_rescued_data) AS linhas_resgatadas
+    FROM {CATALOG}.bronze.olist_order_reviews
+"""))
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## 8. Teste de idempotência
-# MAGIC Rode a etapa 6 de novo (com `RESET_BRONZE = False`).
+# MAGIC Rode a etapa 6 de novo (com o widget `reset_bronze = false`).
 # MAGIC Esperado: `+0 linhas` em todas. Nada duplica.

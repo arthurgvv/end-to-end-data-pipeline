@@ -1,0 +1,972 @@
+{
+  "datasets": [
+    {
+      "name": "kpis",
+      "displayName": "KPIs",
+      "queryLines": [
+        "SELECT SUM(orders) AS orders, SUM(gmv) AS gmv,\n",
+        "       ROUND(SUM(gmv)/SUM(orders),2) AS avg_ticket,\n",
+        "       (SELECT ROUND(AVG(review_score),2) FROM workspace.gold.fact_orders WHERE is_valid_sale) AS avg_review,\n",
+        "       (SELECT ROUND(AVG(CAST(is_late AS INT)),4) FROM workspace.gold.fact_orders WHERE is_valid_sale) AS late_rate,\n",
+        "       (SELECT COUNT(*) FROM workspace.gold.customer_rfm) AS customers\n",
+        "FROM workspace.gold.agg_sales_monthly\n"
+      ]
+    },
+    {
+      "name": "monthly",
+      "displayName": "Vendas mensais",
+      "queryLines": [
+        "SELECT TO_DATE(CONCAT(year_month,'-01')) AS month, orders, gmv, avg_ticket, late_rate, avg_review_score\n",
+        "FROM workspace.gold.agg_sales_monthly WHERE year_month BETWEEN '2017-01' AND '2018-08'\n"
+      ]
+    },
+    {
+      "name": "category",
+      "displayName": "Top categorias",
+      "queryLines": [
+        "SELECT category_name, revenue, avg_review_score FROM workspace.gold.agg_category_performance\n",
+        "WHERE revenue_rank <= 10\n"
+      ]
+    },
+    {
+      "name": "state",
+      "displayName": "Por UF",
+      "queryLines": [
+        "SELECT state, region, gmv, orders, avg_delivery_days, late_rate FROM workspace.gold.agg_state_performance\n"
+      ]
+    },
+    {
+      "name": "late_vs_review",
+      "displayName": "Atraso x nota",
+      "queryLines": [
+        "SELECT CASE WHEN is_late THEN 'Atrasado' WHEN NOT is_late THEN 'No prazo' ELSE 'Nao entregue' END AS entrega,\n",
+        "       ROUND(AVG(review_score),2) AS nota_media, COUNT(*) AS pedidos\n",
+        "FROM workspace.gold.fact_orders WHERE review_score IS NOT NULL GROUP BY 1\n"
+      ]
+    },
+    {
+      "name": "rfm",
+      "displayName": "Segmentos RFM",
+      "queryLines": [
+        "SELECT segment, COUNT(*) AS clientes, ROUND(SUM(monetary),2) AS receita FROM workspace.gold.customer_rfm GROUP BY segment\n"
+      ]
+    },
+    {
+      "name": "payment",
+      "displayName": "Pagamentos",
+      "queryLines": [
+        "SELECT payment_type, total_value FROM workspace.gold.agg_payment_methods\n"
+      ]
+    },
+    {
+      "name": "dq",
+      "displayName": "Qualidade",
+      "queryLines": [
+        "SELECT layer, severity, check_name, violations, passed, checked_at FROM workspace.gold.data_quality_log\n",
+        "WHERE run_id = (SELECT MAX_BY(run_id, checked_at) FROM workspace.gold.data_quality_log)\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "executivo",
+      "displayName": "Visão executiva",
+      "layout": [
+        {
+          "widget": {
+            "name": "title",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Olist E-commerce — Visão Executiva\n",
+                "Dados: camada Gold (`workspace.gold`). Vendas válidas = pedidos não cancelados/indisponíveis."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "k_gmv",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpis",
+                  "fields": [
+                    {
+                      "name": "gmv",
+                      "expression": "`gmv`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "gmv",
+                  "displayName": "GMV total",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "BRL",
+                    "abbreviation": "compact"
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "GMV total"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 1,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "k_orders",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpis",
+                  "fields": [
+                    {
+                      "name": "orders",
+                      "expression": "`orders`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "orders",
+                  "displayName": "Pedidos"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Pedidos"
+              }
+            }
+          },
+          "position": {
+            "x": 1,
+            "y": 2,
+            "width": 1,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "k_customers",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpis",
+                  "fields": [
+                    {
+                      "name": "customers",
+                      "expression": "`customers`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "customers",
+                  "displayName": "Clientes únicos"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Clientes únicos"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 2,
+            "width": 1,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "k_ticket",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpis",
+                  "fields": [
+                    {
+                      "name": "avg_ticket",
+                      "expression": "`avg_ticket`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg_ticket",
+                  "displayName": "Ticket médio",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "BRL"
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Ticket médio"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 2,
+            "width": 1,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "k_review",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpis",
+                  "fields": [
+                    {
+                      "name": "avg_review",
+                      "expression": "`avg_review`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg_review",
+                  "displayName": "Nota média (1-5)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Nota média (1-5)"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 2,
+            "width": 1,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "k_late",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpis",
+                  "fields": [
+                    {
+                      "name": "late_rate",
+                      "expression": "`late_rate`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "late_rate",
+                  "displayName": "Entregas atrasadas",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Entregas atrasadas"
+              }
+            }
+          },
+          "position": {
+            "x": 5,
+            "y": 2,
+            "width": 1,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "c_gmv",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "monthly",
+                  "fields": [
+                    {
+                      "name": "month",
+                      "expression": "`month`"
+                    },
+                    {
+                      "name": "gmv",
+                      "expression": "`gmv`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "month",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "month"
+                },
+                "y": {
+                  "fieldName": "gmv",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "gmv"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "GMV mensal (R$)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "c_orders",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "monthly",
+                  "fields": [
+                    {
+                      "name": "month",
+                      "expression": "`month`"
+                    },
+                    {
+                      "name": "orders",
+                      "expression": "`orders`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "month",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "month"
+                },
+                "y": {
+                  "fieldName": "orders",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "orders"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Pedidos por mês"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 5,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "c_cat",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "category",
+                  "fields": [
+                    {
+                      "name": "revenue",
+                      "expression": "`revenue`"
+                    },
+                    {
+                      "name": "category_name",
+                      "expression": "`category_name`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "revenue",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "revenue"
+                },
+                "y": {
+                  "fieldName": "category_name",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  },
+                  "displayName": "category_name"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Top 10 categorias por receita (R$)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 11,
+            "width": 3,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "c_state",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "state",
+                  "fields": [
+                    {
+                      "name": "state",
+                      "expression": "`state`"
+                    },
+                    {
+                      "name": "gmv",
+                      "expression": "`gmv`"
+                    },
+                    {
+                      "name": "region",
+                      "expression": "`region`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "state",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "state"
+                },
+                "y": {
+                  "fieldName": "gmv",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "gmv"
+                },
+                "color": {
+                  "fieldName": "region",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "region"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "GMV por UF do cliente"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 11,
+            "width": 3,
+            "height": 7
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    },
+    {
+      "name": "operacao",
+      "displayName": "Logística e clientes",
+      "layout": [
+        {
+          "widget": {
+            "name": "title2",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Logística, clientes e qualidade\n",
+                "Atraso na entrega é o principal detrator de satisfação."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "c_late_review",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "late_vs_review",
+                  "fields": [
+                    {
+                      "name": "entrega",
+                      "expression": "`entrega`"
+                    },
+                    {
+                      "name": "nota_media",
+                      "expression": "`nota_media`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "entrega",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "entrega"
+                },
+                "y": {
+                  "fieldName": "nota_media",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "nota_media"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Nota média por situação da entrega"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 2,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "c_late_month",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "monthly",
+                  "fields": [
+                    {
+                      "name": "month",
+                      "expression": "`month`"
+                    },
+                    {
+                      "name": "late_rate",
+                      "expression": "`late_rate`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "month",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "month"
+                },
+                "y": {
+                  "fieldName": "late_rate",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "late_rate"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Taxa de atraso por mês"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 2,
+            "width": 2,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "c_pay",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "payment",
+                  "fields": [
+                    {
+                      "name": "total_value",
+                      "expression": "`total_value`"
+                    },
+                    {
+                      "name": "payment_type",
+                      "expression": "`payment_type`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "pie",
+              "encodings": {
+                "angle": {
+                  "fieldName": "total_value",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "total_value"
+                },
+                "color": {
+                  "fieldName": "payment_type",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "payment_type"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Receita por forma de pagamento"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 2,
+            "width": 2,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "c_rfm",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "rfm",
+                  "fields": [
+                    {
+                      "name": "clientes",
+                      "expression": "`clientes`"
+                    },
+                    {
+                      "name": "segment",
+                      "expression": "`segment`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "clientes",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "clientes"
+                },
+                "y": {
+                  "fieldName": "segment",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  },
+                  "displayName": "segment"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Clientes por segmento RFM"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "c_delivery_uf",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "state",
+                  "fields": [
+                    {
+                      "name": "state",
+                      "expression": "`state`"
+                    },
+                    {
+                      "name": "avg_delivery_days",
+                      "expression": "`avg_delivery_days`"
+                    },
+                    {
+                      "name": "region",
+                      "expression": "`region`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "state",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "state"
+                },
+                "y": {
+                  "fieldName": "avg_delivery_days",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "avg_delivery_days"
+                },
+                "color": {
+                  "fieldName": "region",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "region"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Prazo médio de entrega por UF (dias)"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 8,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "t_dq",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "dq",
+                  "fields": [
+                    {
+                      "name": "passed",
+                      "expression": "`passed`"
+                    },
+                    {
+                      "name": "severity",
+                      "expression": "`severity`"
+                    },
+                    {
+                      "name": "layer",
+                      "expression": "`layer`"
+                    },
+                    {
+                      "name": "check_name",
+                      "expression": "`check_name`"
+                    },
+                    {
+                      "name": "violations",
+                      "expression": "`violations`"
+                    },
+                    {
+                      "name": "checked_at",
+                      "expression": "`checked_at`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "passed",
+                    "displayName": "passed"
+                  },
+                  {
+                    "fieldName": "severity",
+                    "displayName": "severity"
+                  },
+                  {
+                    "fieldName": "layer",
+                    "displayName": "layer"
+                  },
+                  {
+                    "fieldName": "check_name",
+                    "displayName": "check_name"
+                  },
+                  {
+                    "fieldName": "violations",
+                    "displayName": "violations"
+                  },
+                  {
+                    "fieldName": "checked_at",
+                    "displayName": "checked_at"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Qualidade de dados — última execução"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 14,
+            "width": 6,
+            "height": 8
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS"
+    }
+  ]
+}

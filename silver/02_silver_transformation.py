@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # 02 - Silver: limpeza e padronização
 # MAGIC Regras desta camada:
@@ -12,11 +16,12 @@
 # COMMAND ----------
 
 # ===== 1. Configuração =====
-CATALOG = "workspace"                                    # catálogo do Unity Catalog
+# Parâmetro: o Job envia "catalog"; rodando à mão, usa o valor padrão do widget
+dbutils.widgets.text("catalog", "workspace", "Catálogo")
+CATALOG = dbutils.widgets.get("catalog")                 # catálogo do Unity Catalog (ex: workspace, dev, prod)
 BRONZE = f"{CATALOG}.bronze"                             # schema de origem
 SILVER = f"{CATALOG}.silver"                             # schema de destino
 LOG_TABLE = f"{SILVER}.transformation_log"               # tabela de log da Silver
-TS_FORMAT = "yyyy-MM-dd HH:mm:ss"                        # formato das datas no Olist (ex: 2017-10-02 10:56:33)
 META = ["_source_file", "_ingestion_timestamp"]          # metadados da Bronze que seguem para a Silver (linhagem)
 
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {SILVER}")       # cria o schema silver, se não existir
@@ -24,49 +29,16 @@ spark.sql(f"CREATE SCHEMA IF NOT EXISTS {SILVER}")       # cria o schema silver,
 # COMMAND ----------
 
 # ===== 2. Funções auxiliares =====
+# Ficam em src/olist_utils.py para poderem ser testadas (tests/test_olist_utils.py)
+import os, sys
+sys.path.append(os.path.abspath("../src"))               # pasta src/ do repositório
+
 from datetime import datetime                            # marca início/fim da carga
-from pyspark.sql import functions as F                   # F.col, F.trim, F.when... (F = apelido)
-from pyspark.sql.window import Window                    # janela: usada no dedup
-
-# Letras com acento e sua versão sem acento (mesma posição = troca)
-ACCENTS    = "áàâãäéèêëíìîïóòôõöúùûüçÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇ"
-NO_ACCENTS = "aaaaaeeeeiiiiooooouuuucAAAAAEEEEIIIIOOOOOUUUUC"
-
-
-def fix_header(df):
-    """Remove o BOM (\\ufeff) que alguns CSVs deixam no nome da 1ª coluna."""
-    return df.toDF(*[c.replace("﻿", "") for c in df.columns])  # toDF = renomeia todas as colunas
-
-
-def clean_strings(df):
-    """Trim em toda coluna STRING. Texto vazio vira NULL."""
-    for name, dtype in df.dtypes:                        # dtypes = lista de (nome, tipo)
-        if dtype == "string":                            # só mexe em texto
-            trimmed = F.trim(F.col(name))                # tira espaço do início e do fim
-            df = df.withColumn(name, F.when(trimmed == "", None).otherwise(trimmed))  # "" -> NULL
-    return df
-
-
-# Casts com try_: valor inválido vira NULL em vez de quebrar o job
-def to_int(c):    return F.expr(f"try_cast({c} AS INT)")              # texto -> inteiro
-def to_double(c): return F.expr(f"try_cast({c} AS DOUBLE)")           # texto -> decimal flutuante (lat/lng)
-def to_dec(c):    return F.expr(f"try_cast({c} AS DECIMAL(10,2))")    # texto -> dinheiro (2 casas, exato)
-def to_ts(c):     return F.expr(f"try_to_timestamp({c}, '{TS_FORMAT}')")  # texto -> data/hora
-
-# Padronizações de texto
-def norm_city(c):  return F.translate(F.lower(F.col(c)), ACCENTS, NO_ACCENTS)  # "São Paulo" -> "sao paulo"
-def norm_state(c): return F.upper(F.col(c))                                    # "sp" -> "SP"
-def norm_zip(c):   return F.lpad(F.col(c), 5, "0")                             # "1037" -> "01037"
-
-
-def dedup(df, keys):
-    """Mantém 1 linha por chave: a mais recente da Bronze."""
-    w = Window.partitionBy(*keys).orderBy(F.col("_ingestion_timestamp").desc())  # grupo = chave; mais nova primeiro
-    return (
-        df.withColumn("_rn", F.row_number().over(w))     # numera 1, 2, 3... dentro de cada chave
-        .filter(F.col("_rn") == 1)                       # fica só a 1ª (mais recente)
-        .drop("_rn")                                     # remove a coluna auxiliar
-    )
+from pyspark.sql import functions as F                   # F.col, F.lower... (F = apelido)
+from olist_utils import (                                # limpeza, casts, padronização e dedup
+    fix_header, clean_strings, to_int, to_double, to_dec, to_ts,
+    norm_city, norm_state, norm_zip, dedup,
+)
 
 # COMMAND ----------
 
@@ -284,64 +256,71 @@ for t in TABLES:
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC -- Última execução: todas SUCCESS?
-# MAGIC SELECT * FROM workspace.silver.transformation_log
-# MAGIC ORDER BY started_at DESC
+# Última execução: todas SUCCESS?
+display(spark.sql(f"""
+    SELECT * FROM {CATALOG}.silver.transformation_log
+    ORDER BY started_at DESC
+"""))
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC -- Tipos: datas devem ser TIMESTAMP (não mais STRING)
-# MAGIC DESCRIBE workspace.silver.olist_orders
+# Tipos: datas devem ser TIMESTAMP (não mais STRING)
+display(spark.sql(f"""
+    DESCRIBE {CATALOG}.silver.olist_orders
+"""))
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC -- Chave única: linhas = chaves distintas
-# MAGIC -- Esperado (dataset original): orders 99.441 | customers 99.441 | products 32.951 | sellers 3.095
-# MAGIC SELECT 'olist_orders' AS tabela, COUNT(*) AS linhas, COUNT(DISTINCT order_id) AS chaves FROM workspace.silver.olist_orders
-# MAGIC UNION ALL
-# MAGIC SELECT 'olist_customers', COUNT(*), COUNT(DISTINCT customer_id) FROM workspace.silver.olist_customers
-# MAGIC UNION ALL
-# MAGIC SELECT 'olist_products', COUNT(*), COUNT(DISTINCT product_id) FROM workspace.silver.olist_products
-# MAGIC UNION ALL
-# MAGIC SELECT 'olist_sellers', COUNT(*), COUNT(DISTINCT seller_id) FROM workspace.silver.olist_sellers
+# Chave única: linhas = chaves distintas
+# Esperado (dataset original): orders 99.441 | customers 99.441 | products 32.951 | sellers 3.095
+display(spark.sql(f"""
+    SELECT 'olist_orders' AS tabela, COUNT(*) AS linhas, COUNT(DISTINCT order_id) AS chaves FROM {CATALOG}.silver.olist_orders
+    UNION ALL
+    SELECT 'olist_customers', COUNT(*), COUNT(DISTINCT customer_id) FROM {CATALOG}.silver.olist_customers
+    UNION ALL
+    SELECT 'olist_products', COUNT(*), COUNT(DISTINCT product_id) FROM {CATALOG}.silver.olist_products
+    UNION ALL
+    SELECT 'olist_sellers', COUNT(*), COUNT(DISTINCT seller_id) FROM {CATALOG}.silver.olist_sellers
+"""))
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC -- Cast falhou? try_cast vira NULL. Data de compra nunca pode ser nula.
-# MAGIC -- Esperado: 0
-# MAGIC SELECT COUNT(*) AS compras_sem_data
-# MAGIC FROM workspace.silver.olist_orders
-# MAGIC WHERE order_purchase_timestamp IS NULL
+# Cast falhou? try_cast vira NULL. Data de compra nunca pode ser nula.
+# Esperado: 0
+display(spark.sql(f"""
+    SELECT COUNT(*) AS compras_sem_data
+    FROM {CATALOG}.silver.olist_orders
+    WHERE order_purchase_timestamp IS NULL
+"""))
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC -- Órfãos: item sem pedido correspondente. Esperado: 0
-# MAGIC SELECT COUNT(*) AS itens_orfaos
-# MAGIC FROM workspace.silver.olist_order_items i
-# MAGIC LEFT ANTI JOIN workspace.silver.olist_orders o
-# MAGIC   ON i.order_id = o.order_id
+# Órfãos: item sem pedido correspondente. Esperado: 0
+display(spark.sql(f"""
+    SELECT COUNT(*) AS itens_orfaos
+    FROM {CATALOG}.silver.olist_order_items i
+    LEFT ANTI JOIN {CATALOG}.silver.olist_orders o
+      ON i.order_id = o.order_id
+"""))
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC -- Padronização: CEP com 5 dígitos, UF maiúscula, cidade sem acento
-# MAGIC SELECT customer_zip_code_prefix, customer_city, customer_state
-# MAGIC FROM workspace.silver.olist_customers
-# MAGIC WHERE customer_city LIKE 'sao paulo%'
-# MAGIC LIMIT 5
+# Padronização: CEP com 5 dígitos, UF maiúscula, cidade sem acento
+display(spark.sql(f"""
+    SELECT customer_zip_code_prefix, customer_city, customer_state
+    FROM {CATALOG}.silver.olist_customers
+    WHERE customer_city LIKE 'sao paulo%'
+    LIMIT 5
+"""))
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC -- Categorias sem tradução (usam o nome em PT como fallback)
-# MAGIC SELECT DISTINCT product_category_name, product_category_name_english
-# MAGIC FROM workspace.silver.olist_products
-# MAGIC WHERE product_category_name = product_category_name_english
+# Categorias sem tradução (usam o nome em PT como fallback)
+display(spark.sql(f"""
+    SELECT DISTINCT product_category_name, product_category_name_english
+    FROM {CATALOG}.silver.olist_products
+    WHERE product_category_name = product_category_name_english
+"""))
 
 # COMMAND ----------
 
