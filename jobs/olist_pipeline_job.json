@@ -1,0 +1,25 @@
+{
+  "name": "olist_end_to_end_pipeline",
+  "description": "Pipeline medalhao Olist: Testes unitarios -> Bronze (Auto Loader) -> Silver (limpeza) -> Gold (modelo estrela + marts) -> Qualidade de dados",
+  "tags": {"project": "end-to-end-data-pipeline", "layer": "all"},
+  "max_concurrent_runs": 1,
+  "timeout_seconds": 3600,
+  "schedule": {"quartz_cron_expression": "0 0 6 * * ?", "timezone_id": "America/Sao_Paulo", "pause_status": "PAUSED"},
+  "email_notifications": {"on_failure": ["seu-email@exemplo.com"]},
+  "parameters": [
+    {"name": "catalog", "default": "workspace"}
+  ],
+  "tasks": [
+    {"task_key": "unit_tests",
+     "notebook_task": {"notebook_path": "/Users/<seu-usuario>/end-to-end-data-pipeline/tests/run_unit_tests"}},
+    {"task_key": "bronze_ingestion", "depends_on": [{"task_key": "unit_tests"}],
+     "notebook_task": {"notebook_path": "/Users/<seu-usuario>/end-to-end-data-pipeline/bronze/01_bronze_ingestion"},
+     "max_retries": 1, "min_retry_interval_millis": 60000},
+    {"task_key": "silver_transformation", "depends_on": [{"task_key": "bronze_ingestion"}],
+     "notebook_task": {"notebook_path": "/Users/<seu-usuario>/end-to-end-data-pipeline/silver/02_silver_transformation"}},
+    {"task_key": "gold_modeling", "depends_on": [{"task_key": "silver_transformation"}],
+     "notebook_task": {"notebook_path": "/Users/<seu-usuario>/end-to-end-data-pipeline/gold/03_gold_modeling"}},
+    {"task_key": "data_quality", "depends_on": [{"task_key": "gold_modeling"}],
+     "notebook_task": {"notebook_path": "/Users/<seu-usuario>/end-to-end-data-pipeline/quality/04_data_quality"}}
+  ]
+}
